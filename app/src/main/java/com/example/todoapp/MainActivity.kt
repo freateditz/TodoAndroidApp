@@ -1,50 +1,63 @@
 package com.example.todoapp
 
 import android.Manifest
-import android.os.Bundle
 import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberDrawerState
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.todoapp.data.TaskStorage
@@ -58,7 +71,6 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
-import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -96,7 +108,6 @@ fun ToDoAppRoot() {
         history.clear()
         history.addAll(storage.loadHistory())
 
-        // Automatically archive previous-day daily tasks into history buckets.
         val todayKey = formatDateKey(System.currentTimeMillis())
         val oldDailyTasks = allTasks.filter {
             it.listType == TaskListType.DAILY && it.createdDateKey != todayKey
@@ -128,45 +139,47 @@ fun ToDoAppRoot() {
         }
     }
 
-    when (val screen = currentScreen) {
-        AppScreen.Home -> HomeScreen(
-            onOpenDaily = { currentScreen = AppScreen.List(TaskListType.DAILY) },
-            onOpenWeekly = { currentScreen = AppScreen.List(TaskListType.WEEKLY) },
-            onOpenMonthly = { currentScreen = AppScreen.List(TaskListType.MONTHLY) }
-        )
+    GradientBackdrop {
+        when (val screen = currentScreen) {
+            AppScreen.Home -> HomeScreen(
+                onOpenList = { currentScreen = AppScreen.List(it) },
+                allTasksCount = allTasks.size,
+                completedCount = allTasks.count { it.isDone }
+            )
 
-        is AppScreen.List -> TaskListScreen(
-            listType = screen.listType,
-            tasks = allTasks.filter { it.listType == screen.listType },
-            history = history.filter { it.listType == screen.listType }
-                .sortedByDescending { it.timestampMillis },
-            onBack = { currentScreen = AppScreen.Home },
-            onAddTask = { newTask ->
-                allTasks.add(newTask)
-                storage.saveTasks(allTasks)
-                ReminderScheduler.scheduleReminder(context, newTask)
-            },
-            onUpdateTaskStatus = { taskId, done ->
-                val updated = allTasks.map { task ->
-                    if (task.id == taskId) task.copy(isDone = done) else task
+            is AppScreen.List -> TaskListScreen(
+                listType = screen.listType,
+                tasks = allTasks.filter { it.listType == screen.listType },
+                history = history.filter { it.listType == screen.listType }
+                    .sortedByDescending { it.timestampMillis },
+                onBack = { currentScreen = AppScreen.Home },
+                onAddTask = { newTask ->
+                    allTasks.add(newTask)
+                    storage.saveTasks(allTasks)
+                    ReminderScheduler.scheduleReminder(context, newTask)
+                },
+                onUpdateTaskStatus = { taskId, done ->
+                    val updated = allTasks.map { task ->
+                        if (task.id == taskId) task.copy(isDone = done) else task
+                    }
+                    allTasks.clear()
+                    allTasks.addAll(updated)
+                    storage.saveTasks(allTasks)
+
+                    val changedTask = updated.firstOrNull { it.id == taskId } ?: return@TaskListScreen
+                    val entry = HistoryItem(
+                        id = UUID.randomUUID().toString(),
+                        taskTitle = changedTask.title,
+                        listType = changedTask.listType,
+                        actionText = if (done) "Marked done" else "Marked not done",
+                        dayDateLabel = formatHumanDate(System.currentTimeMillis()),
+                        timestampMillis = System.currentTimeMillis()
+                    )
+                    history.add(entry)
+                    storage.saveHistory(history)
                 }
-                allTasks.clear()
-                allTasks.addAll(updated)
-                storage.saveTasks(allTasks)
-
-                val changedTask = updated.firstOrNull { it.id == taskId } ?: return@TaskListScreen
-                val entry = HistoryItem(
-                    id = UUID.randomUUID().toString(),
-                    taskTitle = changedTask.title,
-                    listType = changedTask.listType,
-                    actionText = if (done) "Marked done" else "Marked not done",
-                    dayDateLabel = formatHumanDate(System.currentTimeMillis()),
-                    timestampMillis = System.currentTimeMillis()
-                )
-                history.add(entry)
-                storage.saveHistory(history)
-            }
-        )
+            )
+        }
     }
 }
 
@@ -174,7 +187,9 @@ fun ToDoAppRoot() {
 @Composable
 fun GreetingPreview() {
     ToDoAppTheme {
-        HomeScreen({}, {}, {})
+        GradientBackdrop {
+            HomeScreen(onOpenList = {}, allTasksCount = 12, completedCount = 7)
+        }
     }
 }
 
@@ -183,47 +198,201 @@ private sealed class AppScreen {
     data class List(val listType: TaskListType) : AppScreen()
 }
 
+private enum class ListSection {
+    TASKS,
+    HISTORY
+}
+
+@Composable
+private fun GradientBackdrop(content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF071120),
+                        Color(0xFF0B1D34),
+                        Color(0xFF132C4A)
+                    )
+                )
+            )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            Color(0x44FFFFFF),
+                            Color.Transparent
+                        ),
+                        radius = 900f
+                    )
+                )
+        )
+        content()
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HomeScreen(
-    onOpenDaily: () -> Unit,
-    onOpenWeekly: () -> Unit,
-    onOpenMonthly: () -> Unit
+    onOpenList: (TaskListType) -> Unit,
+    allTasksCount: Int,
+    completedCount: Int
 ) {
-    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-        Column(
+    var pickerExpanded by remember { mutableStateOf(false) }
+    var quickTarget by remember { mutableStateOf(TaskListType.DAILY) }
+
+    Scaffold(
+        containerColor = Color.Transparent,
+        modifier = Modifier.fillMaxSize()
+    ) { innerPadding ->
+        LazyColumn(
             modifier = Modifier
                 .padding(innerPadding)
-                .padding(20.dp)
                 .fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text(
-                text = "ToDoApp",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "Choose your list type",
-                style = MaterialTheme.typography.bodyLarge
-            )
-            HomeOptionCard(title = "Daily List", subtitle = "Tasks for today", onClick = onOpenDaily)
-            HomeOptionCard(title = "Weekly List", subtitle = "Tasks for this week", onClick = onOpenWeekly)
-            HomeOptionCard(title = "Monthly List", subtitle = "Plan your month", onClick = onOpenMonthly)
+            item {
+                GlassPanel {
+                    Text(
+                        text = "ToDo Hub",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Blue glass dashboard for your daily, weekly, and monthly planning.",
+                        color = Color(0xE6EAF4FF)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        MetricPill(label = "All Tasks", value = allTasksCount.toString())
+                        MetricPill(label = "Completed", value = completedCount.toString())
+                    }
+                }
+            }
+
+            item {
+                SectionTitle("Planning Sections")
+            }
+
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    HomeOptionCard(
+                        modifier = Modifier.weight(1f),
+                        title = "Daily",
+                        subtitle = "Today focus",
+                        onClick = { onOpenList(TaskListType.DAILY) }
+                    )
+                    HomeOptionCard(
+                        modifier = Modifier.weight(1f),
+                        title = "Weekly",
+                        subtitle = "Week strategy",
+                        onClick = { onOpenList(TaskListType.WEEKLY) }
+                    )
+                }
+            }
+
+            item {
+                HomeOptionCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = "Monthly",
+                    subtitle = "Longer horizon planning",
+                    onClick = { onOpenList(TaskListType.MONTHLY) }
+                )
+            }
+
+            item {
+                SectionTitle("Quick Open")
+            }
+
+            item {
+                GlassPanel {
+                    Text(
+                        text = "Jump to a section with dropdown",
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFF2F7FF)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    ExposedDropdownMenuBox(
+                        expanded = pickerExpanded,
+                        onExpandedChange = { pickerExpanded = !pickerExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = taskListTitle(quickTarget),
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("List Type") },
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = pickerExpanded)
+                            },
+                            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor()
+                        )
+                        DropdownMenu(
+                            expanded = pickerExpanded,
+                            onDismissRequest = { pickerExpanded = false }
+                        ) {
+                            TaskListType.entries.forEach { type ->
+                                DropdownMenuItem(
+                                    text = { Text(taskListTitle(type)) },
+                                    onClick = {
+                                        quickTarget = type
+                                        pickerExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Button(
+                        onClick = { onOpenList(quickTarget) },
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF5DA8FF),
+                            contentColor = Color(0xFF031127)
+                        )
+                    ) {
+                        Text("Open ${taskListTitle(quickTarget)}")
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun HomeOptionCard(title: String, subtitle: String, onClick: () -> Unit) {
+private fun HomeOptionCard(
+    modifier: Modifier,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = Color(0x40FFFFFF)),
+        shape = RoundedCornerShape(18.dp),
+        border = CardDefaults.outlinedCardBorder().copy(brush = Brush.verticalGradient(
+            colors = listOf(Color(0x66FFFFFF), Color(0x1AFFFFFF))
+        ))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(text = title, style = MaterialTheme.typography.titleLarge)
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(text = title, style = MaterialTheme.typography.titleLarge, color = Color.White)
+            Text(text = subtitle, style = MaterialTheme.typography.bodyMedium, color = Color(0xCCDCEBFF))
             Spacer(modifier = Modifier.height(4.dp))
-            Text(text = subtitle, style = MaterialTheme.typography.bodyMedium)
+            Text(text = "Tap to open", style = MaterialTheme.typography.labelMedium, color = Color(0xFF7CC4FF))
         }
     }
 }
@@ -239,74 +408,85 @@ private fun TaskListScreen(
     onUpdateTaskStatus: (String, Boolean) -> Unit
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
-    var showHistory by remember { mutableStateOf(false) }
-    val drawerState = rememberDrawerState(initialValue = androidx.compose.material3.DrawerValue.Closed)
-    val scope = rememberCoroutineScope()
+    var selectedSection by remember { mutableStateOf(ListSection.TASKS) }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            ModalDrawerSheet {
-                Spacer(modifier = Modifier.height(12.dp))
-                TextButton(onClick = {
-                    showHistory = false
-                    scope.launch { drawerState.close() }
-                }) {
-                    Text("Task List")
+    Scaffold(
+        containerColor = Color.Transparent,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(taskListTitle(listType), color = Color.White)
+                        Text(
+                            text = taskListSubtitle(listType),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color(0xFFD2E5FF)
+                        )
+                    }
+                },
+                actions = {
+                    TextButton(onClick = onBack) {
+                        Text("Home")
+                    }
                 }
-                TextButton(onClick = {
-                    showHistory = true
-                    scope.launch { drawerState.close() }
-                }) {
-                    Text("History")
+            )
+        },
+        floatingActionButton = {
+            if (selectedSection == ListSection.TASKS) {
+                FloatingActionButton(
+                    onClick = { showAddDialog = true },
+                    containerColor = Color(0xFF5DA8FF),
+                    contentColor = Color(0xFF031127)
+                ) {
+                    Text("+")
                 }
             }
-        }
-    ) {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Text(
-                            when (listType) {
-                                TaskListType.DAILY -> "Daily Tasks"
-                                TaskListType.WEEKLY -> "Weekly Tasks"
-                                TaskListType.MONTHLY -> "Monthly Tasks"
-                            }
-                        )
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Text("=", style = MaterialTheme.typography.titleLarge)
-                        }
-                    },
-                    actions = {
-                        TextButton(onClick = onBack) {
-                            Text("Home")
-                        }
-                    }
-                )
-            },
-            floatingActionButton = {
-                if (!showHistory) {
-                    FloatingActionButton(onClick = { showAddDialog = true }) {
-                        Text("+")
-                    }
+        },
+        modifier = Modifier.fillMaxSize()
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                GlassPanel {
+                    Text(
+                        text = "${tasks.count { it.isDone }}/${tasks.size} completed",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(taskListDescription(listType), color = Color(0xD9E2F1FF))
                 }
-            },
-            modifier = Modifier.fillMaxSize()
-        ) { innerPadding ->
-            if (showHistory) {
-                HistoryContent(
-                    history = history,
-                    modifier = Modifier.padding(innerPadding)
-                )
-            } else {
-                TaskContent(
-                    tasks = tasks,
-                    modifier = Modifier.padding(innerPadding),
-                    onUpdateTaskStatus = onUpdateTaskStatus
-                )
+            }
+
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionToggleButton(
+                        modifier = Modifier.weight(1f),
+                        selected = selectedSection == ListSection.TASKS,
+                        text = "Tasks",
+                        onClick = { selectedSection = ListSection.TASKS }
+                    )
+                    SectionToggleButton(
+                        modifier = Modifier.weight(1f),
+                        selected = selectedSection == ListSection.HISTORY,
+                        text = "History",
+                        onClick = { selectedSection = ListSection.HISTORY }
+                    )
+                }
+            }
+
+            item {
+                if (selectedSection == ListSection.TASKS) {
+                    TaskContent(tasks = tasks, onUpdateTaskStatus = onUpdateTaskStatus)
+                } else {
+                    HistoryContent(history = history)
+                }
             }
         }
     }
@@ -324,42 +504,75 @@ private fun TaskListScreen(
 }
 
 @Composable
+private fun SectionToggleButton(
+    modifier: Modifier,
+    selected: Boolean,
+    text: String,
+    onClick: () -> Unit
+) {
+    val bg = if (selected) Color(0xFF5DA8FF) else Color(0x33FFFFFF)
+    val fg = if (selected) Color(0xFF041225) else Color.White
+    Button(
+        onClick = onClick,
+        modifier = modifier,
+        colors = ButtonDefaults.buttonColors(containerColor = bg, contentColor = fg),
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Text(text)
+    }
+}
+
+@Composable
 private fun TaskContent(
     tasks: List<TaskItem>,
-    modifier: Modifier,
     onUpdateTaskStatus: (String, Boolean) -> Unit
 ) {
     if (tasks.isEmpty()) {
-        Column(modifier = modifier.padding(20.dp)) {
-            Text("No tasks yet. Tap + to add one.")
+        GlassPanel {
+            Text(
+                text = "No tasks yet. Tap + to add your first task.",
+                color = Color(0xFFE9F3FF),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
         return
     }
 
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        items(tasks) { task ->
-            Card(modifier = Modifier.fillMaxWidth()) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        tasks.forEach { task ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0x2EFFFFFF)),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = Brush.verticalGradient(listOf(Color(0x55FFFFFF), Color(0x18FFFFFF)))
+                )
+            ) {
                 Column(modifier = Modifier.padding(14.dp)) {
-                    Text(task.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        task.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
                     if (task.description.isNotBlank()) {
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(task.description, style = MaterialTheme.typography.bodyMedium)
+                        Text(task.description, style = MaterialTheme.typography.bodyMedium, color = Color(0xD9DFECFF))
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text("When: ${task.scheduleText}", style = MaterialTheme.typography.bodySmall)
-                    Text("Reminder: ${task.reminderText}", style = MaterialTheme.typography.bodySmall)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Schedule: ${task.scheduleText}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFB9D4F8))
+                    Text("Reminder: ${task.reminderText}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFB9D4F8))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         Checkbox(
                             checked = task.isDone,
                             onCheckedChange = { checked -> onUpdateTaskStatus(task.id, checked) }
                         )
-                        Text(if (task.isDone) "Done" else "Not done", modifier = Modifier.padding(top = 12.dp))
+                        Text(if (task.isDone) "Done" else "In progress", color = Color.White)
                     }
                 }
             }
@@ -368,32 +581,46 @@ private fun TaskContent(
 }
 
 @Composable
-private fun HistoryContent(history: List<HistoryItem>, modifier: Modifier) {
+private fun HistoryContent(history: List<HistoryItem>) {
     if (history.isEmpty()) {
-        Column(modifier = modifier.padding(20.dp)) {
-            Text("No history found yet.")
+        GlassPanel {
+            Text(
+                text = "No history found yet.",
+                color = Color(0xFFE9F3FF),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
         return
     }
 
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        items(history) { entry ->
-            Card(modifier = Modifier.fillMaxWidth()) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        history.forEach { entry ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0x2EFFFFFF)),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = Brush.verticalGradient(listOf(Color(0x55FFFFFF), Color(0x18FFFFFF)))
+                )
+            ) {
                 Column(modifier = Modifier.padding(14.dp)) {
-                    Text(entry.taskTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(entry.actionText, style = MaterialTheme.typography.bodyMedium)
-                    Text(entry.dayDateLabel, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        entry.taskTitle,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(entry.actionText, style = MaterialTheme.typography.bodyMedium, color = Color(0xFFE6F0FF))
+                    Text(entry.dayDateLabel, style = MaterialTheme.typography.bodySmall, color = Color(0xFFB9D4F8))
                 }
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddTaskDialog(
     listType: TaskListType,
@@ -406,9 +633,9 @@ private fun AddTaskDialog(
     var dailyTime by remember { mutableStateOf("") }
     var dailyReminderTime by remember { mutableStateOf("") }
 
-    var weeklyDay by remember { mutableStateOf("") }
+    var weeklyDay by remember { mutableStateOf("Monday") }
     var weeklyTime by remember { mutableStateOf("") }
-    var weeklyReminderDay by remember { mutableStateOf("") }
+    var weeklyReminderDay by remember { mutableStateOf("Monday") }
     var weeklyReminderTime by remember { mutableStateOf("") }
 
     var monthlyDate by remember { mutableStateOf("") }
@@ -420,25 +647,33 @@ private fun AddTaskDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add Task") },
+        containerColor = Color(0xFF12243A),
+        tonalElevation = 6.dp,
+        title = { Text("Add Task", color = Color.White) },
         text = {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                item {
+                    SectionTitle("Task Details")
+                }
                 item {
                     OutlinedTextField(
                         value = title,
                         onValueChange = { title = it },
                         label = { Text("Task name") },
+                        singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
 
                 when (listType) {
                     TaskListType.DAILY -> {
+                        item { SectionTitle("Schedule") }
                         item {
                             OutlinedTextField(
                                 value = dailyTime,
                                 onValueChange = { dailyTime = it },
                                 label = { Text("Task time (HH:mm)") },
+                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -447,18 +682,19 @@ private fun AddTaskDialog(
                                 value = dailyReminderTime,
                                 onValueChange = { dailyReminderTime = it },
                                 label = { Text("Reminder time (HH:mm)") },
+                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
                     }
 
                     TaskListType.WEEKLY -> {
+                        item { SectionTitle("Schedule") }
                         item {
-                            OutlinedTextField(
-                                value = weeklyDay,
-                                onValueChange = { weeklyDay = it },
-                                label = { Text("Task day (Mon/Tue/...)") },
-                                modifier = Modifier.fillMaxWidth()
+                            DayDropdownField(
+                                label = "Task day",
+                                selectedDay = weeklyDay,
+                                onDaySelected = { weeklyDay = it }
                             )
                         }
                         item {
@@ -466,15 +702,16 @@ private fun AddTaskDialog(
                                 value = weeklyTime,
                                 onValueChange = { weeklyTime = it },
                                 label = { Text("Task time (HH:mm)") },
+                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
+                        item { SectionTitle("Reminder") }
                         item {
-                            OutlinedTextField(
-                                value = weeklyReminderDay,
-                                onValueChange = { weeklyReminderDay = it },
-                                label = { Text("Reminder day (Mon/Tue/...)") },
-                                modifier = Modifier.fillMaxWidth()
+                            DayDropdownField(
+                                label = "Reminder day",
+                                selectedDay = weeklyReminderDay,
+                                onDaySelected = { weeklyReminderDay = it }
                             )
                         }
                         item {
@@ -482,17 +719,20 @@ private fun AddTaskDialog(
                                 value = weeklyReminderTime,
                                 onValueChange = { weeklyReminderTime = it },
                                 label = { Text("Reminder time (HH:mm)") },
+                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
                     }
 
                     TaskListType.MONTHLY -> {
+                        item { SectionTitle("Schedule") }
                         item {
                             OutlinedTextField(
                                 value = monthlyDate,
                                 onValueChange = { monthlyDate = it },
                                 label = { Text("Task date (dd/MM/yyyy)") },
+                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -501,14 +741,17 @@ private fun AddTaskDialog(
                                 value = monthlyTime,
                                 onValueChange = { monthlyTime = it },
                                 label = { Text("Task time (HH:mm)") },
+                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
+                        item { SectionTitle("Reminder") }
                         item {
                             OutlinedTextField(
                                 value = monthlyReminderDate,
                                 onValueChange = { monthlyReminderDate = it },
                                 label = { Text("Reminder date (dd/MM/yyyy)") },
+                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -517,6 +760,7 @@ private fun AddTaskDialog(
                                 value = monthlyReminderTime,
                                 onValueChange = { monthlyReminderTime = it },
                                 label = { Text("Reminder time (HH:mm)") },
+                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -531,6 +775,7 @@ private fun AddTaskDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
+
                 if (validationMessage.isNotBlank()) {
                     item {
                         Text(validationMessage, color = MaterialTheme.colorScheme.error)
@@ -539,37 +784,157 @@ private fun AddTaskDialog(
             }
         },
         confirmButton = {
-            Button(onClick = {
-                val built = buildTaskFromInputs(
-                    listType = listType,
-                    title = title,
-                    description = description,
-                    dailyTime = dailyTime,
-                    dailyReminderTime = dailyReminderTime,
-                    weeklyDay = weeklyDay,
-                    weeklyTime = weeklyTime,
-                    weeklyReminderDay = weeklyReminderDay,
-                    weeklyReminderTime = weeklyReminderTime,
-                    monthlyDate = monthlyDate,
-                    monthlyTime = monthlyTime,
-                    monthlyReminderDate = monthlyReminderDate,
-                    monthlyReminderTime = monthlyReminderTime
+            Button(
+                onClick = {
+                    val built = buildTaskFromInputs(
+                        listType = listType,
+                        title = title,
+                        description = description,
+                        dailyTime = dailyTime,
+                        dailyReminderTime = dailyReminderTime,
+                        weeklyDay = weeklyDay,
+                        weeklyTime = weeklyTime,
+                        weeklyReminderDay = weeklyReminderDay,
+                        weeklyReminderTime = weeklyReminderTime,
+                        monthlyDate = monthlyDate,
+                        monthlyTime = monthlyTime,
+                        monthlyReminderDate = monthlyReminderDate,
+                        monthlyReminderTime = monthlyReminderTime
+                    )
+                    if (built == null) {
+                        validationMessage = "Please fill all required fields with valid format."
+                    } else {
+                        onConfirm(built)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF5DA8FF),
+                    contentColor = Color(0xFF031127)
                 )
-                if (built == null) {
-                    validationMessage = "Please fill all required fields with valid format."
-                } else {
-                    onConfirm(built)
-                }
-            }) {
+            ) {
                 Text("Add")
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text("Cancel", color = Color(0xFFDCEBFF))
             }
         }
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DayDropdownField(
+    label: String,
+    selectedDay: String,
+    onDaySelected: (String) -> Unit
+) {
+    val days = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+    var expanded by remember { mutableStateOf(false) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded }
+    ) {
+        OutlinedTextField(
+            value = selectedDay,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor()
+        )
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            days.forEach { day ->
+                DropdownMenuItem(
+                    text = { Text(day) },
+                    onClick = {
+                        onDaySelected(day)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GlassPanel(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0x33FFFFFF))
+            .border(
+                width = 1.dp,
+                color = Color(0x52FFFFFF),
+                shape = RoundedCornerShape(20.dp)
+            )
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        content = content
+    )
+}
+
+@Composable
+private fun MetricPill(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(100.dp))
+            .background(Color(0x30FFFFFF))
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = label, color = Color(0xFFD2E5FF), style = MaterialTheme.typography.labelMedium)
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text = value, color = Color.White, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun SectionTitle(title: String) {
+    Text(
+        text = title,
+        color = Color(0xFFEAF4FF),
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold
+    )
+}
+
+private fun taskListTitle(type: TaskListType): String {
+    return when (type) {
+        TaskListType.DAILY -> "Daily"
+        TaskListType.WEEKLY -> "Weekly"
+        TaskListType.MONTHLY -> "Monthly"
+    }
+}
+
+private fun taskListSubtitle(type: TaskListType): String {
+    return when (type) {
+        TaskListType.DAILY -> "Today action plan"
+        TaskListType.WEEKLY -> "Week roadmap"
+        TaskListType.MONTHLY -> "Month overview"
+    }
+}
+
+private fun taskListDescription(type: TaskListType): String {
+    return when (type) {
+        TaskListType.DAILY -> "Time-box your day with focused reminders."
+        TaskListType.WEEKLY -> "Plan recurring priorities by weekday."
+        TaskListType.MONTHLY -> "Track bigger goals and milestones."
+    }
 }
 
 private fun buildTaskFromInputs(
