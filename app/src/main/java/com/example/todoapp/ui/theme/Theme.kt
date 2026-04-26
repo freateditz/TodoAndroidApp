@@ -1,16 +1,16 @@
 package com.example.todoapp.ui.theme
 
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 
-private val DarkColorScheme = darkColorScheme(
-    primary = BluePrimary,
-    onPrimary = AppBackground,
-    secondary = BlueSecondary,
-    onSecondary = AppBackground,
-    tertiary = BlueTertiary,
-    onTertiary = AppBackground,
+private val LightColorScheme = lightColorScheme(
+    primary = TerracottaPrimary,
+    onPrimary = androidx.compose.ui.graphics.Color.White,
+    secondary = HoneySecondary,
+    onSecondary = TextPrimary,
+    tertiary = SageTertiary,
+    onTertiary = androidx.compose.ui.graphics.Color.White,
     background = AppBackground,
     onBackground = TextPrimary,
     surface = AppSurface,
@@ -21,11 +21,11 @@ private val DarkColorScheme = darkColorScheme(
 
 @Composable
 fun ToDoAppTheme(
-    darkTheme: Boolean = true,
+    darkTheme: Boolean = false,
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = DarkColorScheme
+    val colorScheme = LightColorScheme
 
     MaterialTheme(
         colorScheme = colorScheme,

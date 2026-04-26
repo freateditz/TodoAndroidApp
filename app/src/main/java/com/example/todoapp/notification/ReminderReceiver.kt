@@ -34,6 +34,7 @@ class ReminderReceiver : BroadcastReceiver() {
             .setContentTitle("Task Reminder")
             .setContentText("$taskTitle ($scheduleText)")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVibrate(VIBRATION_PATTERN)
             .setAutoCancel(true)
             .build()
 
@@ -48,6 +49,8 @@ class ReminderReceiver : BroadcastReceiver() {
             CHANNEL_NAME,
             NotificationManager.IMPORTANCE_HIGH
         )
+        channel.enableVibration(true)
+        channel.vibrationPattern = VIBRATION_PATTERN
         notificationManager.createNotificationChannel(channel)
     }
 
@@ -58,5 +61,6 @@ class ReminderReceiver : BroadcastReceiver() {
 
         const val CHANNEL_ID = "todo_task_reminder_channel"
         const val CHANNEL_NAME = "Task Reminders"
+        private val VIBRATION_PATTERN = longArrayOf(0, 250, 120, 400)
     }
 }

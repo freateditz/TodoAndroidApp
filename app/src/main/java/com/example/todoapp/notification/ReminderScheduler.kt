@@ -25,10 +25,45 @@ object ReminderScheduler {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        alarmManager.setExactAndAllowWhileIdle(
-            AlarmManager.RTC_WAKEUP,
-            task.reminderAtMillis,
-            pendingIntent
+        try {
+            val canUseExact = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                alarmManager.canScheduleExactAlarms()
+            } else {
+                true
+            }
+
+            if (canUseExact) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    task.reminderAtMillis,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    task.reminderAtMillis,
+                    pendingIntent
+                )
+            }
+        } catch (_: SecurityException) {
+            // Fallback to inexact alarm if exact alarm privileges are unavailable.
+            alarmManager.setAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                task.reminderAtMillis,
+                pendingIntent
+            )
+        }
+    }
+
+    fun cancelReminder(context: Context, taskId: String) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(context, ReminderReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            taskId.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        alarmManager.cancel(pendingIntent)
     }
 }

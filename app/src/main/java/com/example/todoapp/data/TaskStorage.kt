@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.todoapp.model.HistoryItem
 import com.example.todoapp.model.TaskItem
 import com.example.todoapp.model.TaskListType
+import com.example.todoapp.model.TaskPriority
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -17,19 +18,28 @@ class TaskStorage(context: Context) {
         val items = mutableListOf<TaskItem>()
         for (index in 0 until jsonArray.length()) {
             val obj = jsonArray.getJSONObject(index)
-            items.add(
+            val parsed = runCatching {
+                val listType = TaskListType.entries.firstOrNull { it.name == obj.optString("listType") }
+                    ?: return@runCatching null
+                val priority = TaskPriority.entries.firstOrNull { it.name == obj.optString("priority") }
+                    ?: TaskPriority.MEDIUM
                 TaskItem(
-                    id = obj.getString("id"),
-                    title = obj.getString("title"),
+                    id = obj.optString("id"),
+                    title = obj.optString("title"),
                     description = obj.optString("description", ""),
-                    listType = TaskListType.valueOf(obj.getString("listType")),
-                    scheduleText = obj.getString("scheduleText"),
-                    reminderText = obj.getString("reminderText"),
+                    listType = listType,
+                    priority = priority,
+                    scheduleText = obj.optString("scheduleText", ""),
+                    reminderText = obj.optString("reminderText", ""),
                     reminderAtMillis = obj.optLong("reminderAtMillis", 0L),
                     createdDateKey = obj.optString("createdDateKey", ""),
                     isDone = obj.optBoolean("isDone", false)
                 )
-            )
+            }.getOrNull()
+
+            if (parsed != null && parsed.id.isNotBlank() && parsed.title.isNotBlank()) {
+                items.add(parsed)
+            }
         }
         return items
     }
@@ -42,6 +52,7 @@ class TaskStorage(context: Context) {
                 .put("title", task.title)
                 .put("description", task.description)
                 .put("listType", task.listType.name)
+                .put("priority", task.priority.name)
                 .put("scheduleText", task.scheduleText)
                 .put("reminderText", task.reminderText)
                 .put("reminderAtMillis", task.reminderAtMillis)
@@ -58,16 +69,22 @@ class TaskStorage(context: Context) {
         val items = mutableListOf<HistoryItem>()
         for (index in 0 until jsonArray.length()) {
             val obj = jsonArray.getJSONObject(index)
-            items.add(
+            val parsed = runCatching {
+                val listType = TaskListType.entries.firstOrNull { it.name == obj.optString("listType") }
+                    ?: return@runCatching null
                 HistoryItem(
-                    id = obj.getString("id"),
-                    taskTitle = obj.getString("taskTitle"),
-                    listType = TaskListType.valueOf(obj.getString("listType")),
-                    actionText = obj.getString("actionText"),
-                    dayDateLabel = obj.getString("dayDateLabel"),
+                    id = obj.optString("id"),
+                    taskTitle = obj.optString("taskTitle"),
+                    listType = listType,
+                    actionText = obj.optString("actionText"),
+                    dayDateLabel = obj.optString("dayDateLabel"),
                     timestampMillis = obj.optLong("timestampMillis", 0L)
                 )
-            )
+            }.getOrNull()
+
+            if (parsed != null && parsed.id.isNotBlank() && parsed.taskTitle.isNotBlank()) {
+                items.add(parsed)
+            }
         }
         return items
     }

@@ -2,17 +2,17 @@ package com.example.todoapp.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val BluePrimary = Color(0xFF5DA8FF)
-val BluePrimaryVariant = Color(0xFF2F7EDC)
-val BlueSecondary = Color(0xFF7CC4FF)
-val BlueTertiary = Color(0xFFA7D5FF)
+val TerracottaPrimary = Color(0xFFC46F3C)
+val TerracottaPrimaryVariant = Color(0xFF9F5226)
+val HoneySecondary = Color(0xFFE0A75A)
+val SageTertiary = Color(0xFF7EA37D)
 
-val AppBackground = Color(0xFF08121F)
-val AppSurface = Color(0xFF0E1D30)
-val AppSurfaceVariant = Color(0xFF14253C)
+val AppBackground = Color(0xFFFBF3E8)
+val AppSurface = Color(0xFFF6E6D4)
+val AppSurfaceVariant = Color(0xFFEED9C1)
 
-val GlassOverlay = Color(0xB3FFFFFF)
-val GlassBorder = Color(0x4DFFFFFF)
+val GlassOverlay = Color(0xCCFFF8F1)
+val GlassBorder = Color(0x33A86A45)
 
-val TextPrimary = Color(0xFFF3F7FF)
-val TextSecondary = Color(0xFFC9D9ED)
+val TextPrimary = Color(0xFF3F2A19)
+val TextSecondary = Color(0xFF705039)

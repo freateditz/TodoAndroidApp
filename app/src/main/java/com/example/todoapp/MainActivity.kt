@@ -1,6 +1,8 @@
 package com.example.todoapp
 
 import android.Manifest
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -56,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -64,13 +67,16 @@ import com.example.todoapp.data.TaskStorage
 import com.example.todoapp.model.HistoryItem
 import com.example.todoapp.model.TaskItem
 import com.example.todoapp.model.TaskListType
+import com.example.todoapp.model.TaskPriority
 import com.example.todoapp.notification.ReminderScheduler
 import com.example.todoapp.ui.theme.ToDoAppTheme
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -86,12 +92,13 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun ToDoAppRoot() {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val storage = remember { TaskStorage(context) }
 
     val allTasks = remember { mutableStateListOf<TaskItem>() }
     val history = remember { mutableStateListOf<HistoryItem>() }
     var currentScreen by remember { mutableStateOf<AppScreen>(AppScreen.Home) }
+    var currentTimeMillis by remember { mutableStateOf(System.currentTimeMillis()) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -139,12 +146,21 @@ fun ToDoAppRoot() {
         }
     }
 
+    LaunchedEffect(Unit) {
+        while (true) {
+            currentTimeMillis = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+
     GradientBackdrop {
         when (val screen = currentScreen) {
             AppScreen.Home -> HomeScreen(
                 onOpenList = { currentScreen = AppScreen.List(it) },
                 allTasksCount = allTasks.size,
-                completedCount = allTasks.count { it.isDone }
+                completedCount = allTasks.count { it.isDone },
+                localTimeLabel = formatLocalClock(currentTimeMillis),
+                timeZoneLabel = TimeZone.getDefault().id
             )
 
             is AppScreen.List -> TaskListScreen(
@@ -177,6 +193,24 @@ fun ToDoAppRoot() {
                     )
                     history.add(entry)
                     storage.saveHistory(history)
+                },
+                onDeleteTask = { taskId ->
+                    val target = allTasks.firstOrNull { it.id == taskId } ?: return@TaskListScreen
+                    allTasks.removeAll { it.id == taskId }
+                    storage.saveTasks(allTasks)
+                    ReminderScheduler.cancelReminder(context, taskId)
+
+                    history.add(
+                        HistoryItem(
+                            id = UUID.randomUUID().toString(),
+                            taskTitle = target.title,
+                            listType = target.listType,
+                            actionText = "Deleted task",
+                            dayDateLabel = formatHumanDate(System.currentTimeMillis()),
+                            timestampMillis = System.currentTimeMillis()
+                        )
+                    )
+                    storage.saveHistory(history)
                 }
             )
         }
@@ -188,7 +222,13 @@ fun ToDoAppRoot() {
 fun GreetingPreview() {
     ToDoAppTheme {
         GradientBackdrop {
-            HomeScreen(onOpenList = {}, allTasksCount = 12, completedCount = 7)
+            HomeScreen(
+                onOpenList = {},
+                allTasksCount = 12,
+                completedCount = 7,
+                localTimeLabel = "Fri, 25 Apr 2026 09:30:00",
+                timeZoneLabel = "Asia/Kolkata"
+            )
         }
     }
 }
@@ -211,9 +251,9 @@ private fun GradientBackdrop(content: @Composable () -> Unit) {
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xFF071120),
-                        Color(0xFF0B1D34),
-                        Color(0xFF132C4A)
+                        Color(0xFFFBF3E8),
+                        Color(0xFFF4E2CE),
+                        Color(0xFFEAD8C4)
                     )
                 )
             )
@@ -224,7 +264,7 @@ private fun GradientBackdrop(content: @Composable () -> Unit) {
                 .background(
                     Brush.radialGradient(
                         colors = listOf(
-                            Color(0x44FFFFFF),
+                            Color(0x66FFFFFF),
                             Color.Transparent
                         ),
                         radius = 900f
@@ -240,7 +280,9 @@ private fun GradientBackdrop(content: @Composable () -> Unit) {
 private fun HomeScreen(
     onOpenList: (TaskListType) -> Unit,
     allTasksCount: Int,
-    completedCount: Int
+    completedCount: Int,
+    localTimeLabel: String,
+    timeZoneLabel: String
 ) {
     var pickerExpanded by remember { mutableStateOf(false) }
     var quickTarget by remember { mutableStateOf(TaskListType.DAILY) }
@@ -262,12 +304,23 @@ private fun HomeScreen(
                         text = "ToDo Hub",
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = Color(0xFF3F2A19)
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Blue glass dashboard for your daily, weekly, and monthly planning.",
-                        color = Color(0xE6EAF4FF)
+                        text = "Warm planner for daily wins, weekly rhythm, and monthly goals.",
+                        color = Color(0xFF6A4A34)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Local time: $localTimeLabel",
+                        color = Color(0xFF6E4D35),
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    Text(
+                        text = "Time zone: $timeZoneLabel",
+                        color = Color(0xFF8C6345),
+                        style = MaterialTheme.typography.labelSmall
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -316,7 +369,7 @@ private fun HomeScreen(
                     Text(
                         text = "Jump to a section with dropdown",
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFFF2F7FF)
+                        color = Color(0xFF4D321E)
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     ExposedDropdownMenuBox(
@@ -356,8 +409,8 @@ private fun HomeScreen(
                         onClick = { onOpenList(quickTarget) },
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF5DA8FF),
-                            contentColor = Color(0xFF031127)
+                            containerColor = Color(0xFFC46F3C),
+                            contentColor = Color.White
                         )
                     ) {
                         Text("Open ${taskListTitle(quickTarget)}")
@@ -379,20 +432,20 @@ private fun HomeOptionCard(
         modifier = modifier
             .clip(RoundedCornerShape(18.dp))
             .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = Color(0x40FFFFFF)),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFEED8C2)),
         shape = RoundedCornerShape(18.dp),
         border = CardDefaults.outlinedCardBorder().copy(brush = Brush.verticalGradient(
-            colors = listOf(Color(0x66FFFFFF), Color(0x1AFFFFFF))
+            colors = listOf(Color(0x99FFFFFF), Color(0x33FFFFFF))
         ))
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text(text = title, style = MaterialTheme.typography.titleLarge, color = Color.White)
-            Text(text = subtitle, style = MaterialTheme.typography.bodyMedium, color = Color(0xCCDCEBFF))
+            Text(text = title, style = MaterialTheme.typography.titleLarge, color = Color(0xFF412A19))
+            Text(text = subtitle, style = MaterialTheme.typography.bodyMedium, color = Color(0xFF6D4A33))
             Spacer(modifier = Modifier.height(4.dp))
-            Text(text = "Tap to open", style = MaterialTheme.typography.labelMedium, color = Color(0xFF7CC4FF))
+            Text(text = "Tap to open", style = MaterialTheme.typography.labelMedium, color = Color(0xFFA04F22))
         }
     }
 }
@@ -405,7 +458,8 @@ private fun TaskListScreen(
     history: List<HistoryItem>,
     onBack: () -> Unit,
     onAddTask: (TaskItem) -> Unit,
-    onUpdateTaskStatus: (String, Boolean) -> Unit
+    onUpdateTaskStatus: (String, Boolean) -> Unit,
+    onDeleteTask: (String) -> Unit
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
     var selectedSection by remember { mutableStateOf(ListSection.TASKS) }
@@ -420,7 +474,7 @@ private fun TaskListScreen(
                         Text(
                             text = taskListSubtitle(listType),
                             style = MaterialTheme.typography.labelMedium,
-                            color = Color(0xFFD2E5FF)
+                            color = Color(0xFF5F422F)
                         )
                     }
                 },
@@ -435,8 +489,8 @@ private fun TaskListScreen(
             if (selectedSection == ListSection.TASKS) {
                 FloatingActionButton(
                     onClick = { showAddDialog = true },
-                    containerColor = Color(0xFF5DA8FF),
-                    contentColor = Color(0xFF031127)
+                    containerColor = Color(0xFFC46F3C),
+                    contentColor = Color.White
                 ) {
                     Text("+")
                 }
@@ -456,11 +510,11 @@ private fun TaskListScreen(
                     Text(
                         text = "${tasks.count { it.isDone }}/${tasks.size} completed",
                         style = MaterialTheme.typography.titleMedium,
-                        color = Color.White,
+                        color = Color(0xFF412A19),
                         fontWeight = FontWeight.SemiBold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(taskListDescription(listType), color = Color(0xD9E2F1FF))
+                    Text(taskListDescription(listType), color = Color(0xFF6B4932))
                 }
             }
 
@@ -483,7 +537,11 @@ private fun TaskListScreen(
 
             item {
                 if (selectedSection == ListSection.TASKS) {
-                    TaskContent(tasks = tasks, onUpdateTaskStatus = onUpdateTaskStatus)
+                    TaskContent(
+                        tasks = tasks,
+                        onUpdateTaskStatus = onUpdateTaskStatus,
+                        onDeleteTask = onDeleteTask
+                    )
                 } else {
                     HistoryContent(history = history)
                 }
@@ -510,8 +568,8 @@ private fun SectionToggleButton(
     text: String,
     onClick: () -> Unit
 ) {
-    val bg = if (selected) Color(0xFF5DA8FF) else Color(0x33FFFFFF)
-    val fg = if (selected) Color(0xFF041225) else Color.White
+    val bg = if (selected) Color(0xFFC46F3C) else Color(0x55FFFFFF)
+    val fg = if (selected) Color.White else Color(0xFF5C3F2D)
     Button(
         onClick = onClick,
         modifier = modifier,
@@ -525,13 +583,39 @@ private fun SectionToggleButton(
 @Composable
 private fun TaskContent(
     tasks: List<TaskItem>,
-    onUpdateTaskStatus: (String, Boolean) -> Unit
+    onUpdateTaskStatus: (String, Boolean) -> Unit,
+    onDeleteTask: (String) -> Unit
 ) {
-    if (tasks.isEmpty()) {
+    var filter by remember { mutableStateOf("All") }
+
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("All", "Pending", "Done").forEach { item ->
+            val selected = filter == item
+            Button(
+                onClick = { filter = item },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (selected) Color(0xFFA55B2F) else Color(0x66FFFFFF),
+                    contentColor = if (selected) Color.White else Color(0xFF5C3F2D)
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(item)
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(10.dp))
+
+    val visibleTasks = when (filter) {
+        "Pending" -> tasks.filterNot { it.isDone }
+        "Done" -> tasks.filter { it.isDone }
+        else -> tasks
+    }
+
+    if (visibleTasks.isEmpty()) {
         GlassPanel {
             Text(
-                text = "No tasks yet. Tap + to add your first task.",
-                color = Color(0xFFE9F3FF),
+                text = if (tasks.isEmpty()) "No tasks yet. Tap + to add your first task." else "No tasks in this filter.",
+                color = Color(0xFF5E412F),
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -540,13 +624,13 @@ private fun TaskContent(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        tasks.forEach { task ->
+        visibleTasks.forEach { task ->
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0x2EFFFFFF)),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF2DFC9)),
                 border = CardDefaults.outlinedCardBorder().copy(
-                    brush = Brush.verticalGradient(listOf(Color(0x55FFFFFF), Color(0x18FFFFFF)))
+                    brush = Brush.verticalGradient(listOf(Color(0xAAFFFFFF), Color(0x44FFFFFF)))
                 )
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
@@ -554,25 +638,37 @@ private fun TaskContent(
                         task.title,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = Color(0xFF412A19)
                     )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    PriorityChip(task.priority)
                     if (task.description.isNotBlank()) {
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(task.description, style = MaterialTheme.typography.bodyMedium, color = Color(0xD9DFECFF))
+                        Text(task.description, style = MaterialTheme.typography.bodyMedium, color = Color(0xFF644633))
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Schedule: ${task.scheduleText}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFB9D4F8))
-                    Text("Reminder: ${task.reminderText}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFB9D4F8))
+                    Text("Schedule: ${task.scheduleText}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF8A6144))
+                    Text("Reminder: ${task.reminderText}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF8A6144))
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Checkbox(
-                            checked = task.isDone,
-                            onCheckedChange = { checked -> onUpdateTaskStatus(task.id, checked) }
-                        )
-                        Text(if (task.isDone) "Done" else "In progress", color = Color.White)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Checkbox(
+                                checked = task.isDone,
+                                onCheckedChange = { checked -> onUpdateTaskStatus(task.id, checked) }
+                            )
+                            Text(if (task.isDone) "Done" else "In progress", color = Color(0xFF4E3424))
+                        }
+                        Spacer(modifier = Modifier.weight(1f))
+                        TextButton(onClick = { onDeleteTask(task.id) }) {
+                            Text("Delete", color = Color(0xFFB3302B))
+                        }
                     }
                 }
             }
@@ -599,9 +695,9 @@ private fun HistoryContent(history: List<HistoryItem>) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0x2EFFFFFF)),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF2DFC9)),
                 border = CardDefaults.outlinedCardBorder().copy(
-                    brush = Brush.verticalGradient(listOf(Color(0x55FFFFFF), Color(0x18FFFFFF)))
+                    brush = Brush.verticalGradient(listOf(Color(0xAAFFFFFF), Color(0x44FFFFFF)))
                 )
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
@@ -609,11 +705,11 @@ private fun HistoryContent(history: List<HistoryItem>) {
                         entry.taskTitle,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White
+                        color = Color(0xFF412A19)
                     )
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(entry.actionText, style = MaterialTheme.typography.bodyMedium, color = Color(0xFFE6F0FF))
-                    Text(entry.dayDateLabel, style = MaterialTheme.typography.bodySmall, color = Color(0xFFB9D4F8))
+                    Text(entry.actionText, style = MaterialTheme.typography.bodyMedium, color = Color(0xFF664733))
+                    Text(entry.dayDateLabel, style = MaterialTheme.typography.bodySmall, color = Color(0xFF8A6144))
                 }
             }
         }
@@ -629,6 +725,7 @@ private fun AddTaskDialog(
 ) {
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
+    var priority by remember { mutableStateOf(TaskPriority.MEDIUM) }
 
     var dailyTime by remember { mutableStateOf("") }
     var dailyReminderTime by remember { mutableStateOf("") }
@@ -647,9 +744,9 @@ private fun AddTaskDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF12243A),
+        containerColor = Color(0xFFF5E7D7),
         tonalElevation = 6.dp,
-        title = { Text("Add Task", color = Color.White) },
+        title = { Text("Add Task", color = Color(0xFF412A19)) },
         text = {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 item {
@@ -664,26 +761,28 @@ private fun AddTaskDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
+                item {
+                    PriorityDropdownField(
+                        selectedPriority = priority,
+                        onPrioritySelected = { priority = it }
+                    )
+                }
 
                 when (listType) {
                     TaskListType.DAILY -> {
                         item { SectionTitle("Schedule") }
                         item {
-                            OutlinedTextField(
-                                value = dailyTime,
-                                onValueChange = { dailyTime = it },
-                                label = { Text("Task time (HH:mm)") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
+                            TimePickerField(
+                                label = "Task time",
+                                timeText = dailyTime,
+                                onTimeSelected = { dailyTime = it }
                             )
                         }
                         item {
-                            OutlinedTextField(
-                                value = dailyReminderTime,
-                                onValueChange = { dailyReminderTime = it },
-                                label = { Text("Reminder time (HH:mm)") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
+                            TimePickerField(
+                                label = "Reminder time",
+                                timeText = dailyReminderTime,
+                                onTimeSelected = { dailyReminderTime = it }
                             )
                         }
                     }
@@ -698,12 +797,10 @@ private fun AddTaskDialog(
                             )
                         }
                         item {
-                            OutlinedTextField(
-                                value = weeklyTime,
-                                onValueChange = { weeklyTime = it },
-                                label = { Text("Task time (HH:mm)") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
+                            TimePickerField(
+                                label = "Task time",
+                                timeText = weeklyTime,
+                                onTimeSelected = { weeklyTime = it }
                             )
                         }
                         item { SectionTitle("Reminder") }
@@ -715,12 +812,10 @@ private fun AddTaskDialog(
                             )
                         }
                         item {
-                            OutlinedTextField(
-                                value = weeklyReminderTime,
-                                onValueChange = { weeklyReminderTime = it },
-                                label = { Text("Reminder time (HH:mm)") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
+                            TimePickerField(
+                                label = "Reminder time",
+                                timeText = weeklyReminderTime,
+                                onTimeSelected = { weeklyReminderTime = it }
                             )
                         }
                     }
@@ -728,43 +823,43 @@ private fun AddTaskDialog(
                     TaskListType.MONTHLY -> {
                         item { SectionTitle("Schedule") }
                         item {
-                            OutlinedTextField(
-                                value = monthlyDate,
-                                onValueChange = { monthlyDate = it },
-                                label = { Text("Task date (dd/MM/yyyy)") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
+                            DatePickerField(
+                                label = "Task date",
+                                dateText = monthlyDate,
+                                onDateSelected = { monthlyDate = it }
                             )
                         }
                         item {
-                            OutlinedTextField(
-                                value = monthlyTime,
-                                onValueChange = { monthlyTime = it },
-                                label = { Text("Task time (HH:mm)") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
+                            TimePickerField(
+                                label = "Task time",
+                                timeText = monthlyTime,
+                                onTimeSelected = { monthlyTime = it }
                             )
                         }
                         item { SectionTitle("Reminder") }
                         item {
-                            OutlinedTextField(
-                                value = monthlyReminderDate,
-                                onValueChange = { monthlyReminderDate = it },
-                                label = { Text("Reminder date (dd/MM/yyyy)") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
+                            DatePickerField(
+                                label = "Reminder date",
+                                dateText = monthlyReminderDate,
+                                onDateSelected = { monthlyReminderDate = it }
                             )
                         }
                         item {
-                            OutlinedTextField(
-                                value = monthlyReminderTime,
-                                onValueChange = { monthlyReminderTime = it },
-                                label = { Text("Reminder time (HH:mm)") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
+                            TimePickerField(
+                                label = "Reminder time",
+                                timeText = monthlyReminderTime,
+                                onTimeSelected = { monthlyReminderTime = it }
                             )
                         }
                     }
+                }
+
+                item {
+                    Text(
+                        text = "All reminders use your current local timezone (${TimeZone.getDefault().id}).",
+                        color = Color(0xFF7D573D),
+                        style = MaterialTheme.typography.labelSmall
+                    )
                 }
 
                 item {
@@ -790,6 +885,7 @@ private fun AddTaskDialog(
                         listType = listType,
                         title = title,
                         description = description,
+                        priority = priority,
                         dailyTime = dailyTime,
                         dailyReminderTime = dailyReminderTime,
                         weeklyDay = weeklyDay,
@@ -808,8 +904,8 @@ private fun AddTaskDialog(
                     }
                 },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF5DA8FF),
-                    contentColor = Color(0xFF031127)
+                    containerColor = Color(0xFFC46F3C),
+                    contentColor = Color.White
                 )
             ) {
                 Text("Add")
@@ -817,9 +913,131 @@ private fun AddTaskDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color(0xFFDCEBFF))
+                Text("Cancel", color = Color(0xFF6D4B34))
             }
         }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PriorityDropdownField(
+    selectedPriority: TaskPriority,
+    onPrioritySelected: (TaskPriority) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded }
+    ) {
+        OutlinedTextField(
+            value = selectedPriority.name.lowercase().replaceFirstChar { it.uppercase() },
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            label = { Text("Priority") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor()
+        )
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            TaskPriority.entries.forEach { priority ->
+                DropdownMenuItem(
+                    text = { Text(priority.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                    onClick = {
+                        onPrioritySelected(priority)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimePickerField(
+    label: String,
+    timeText: String,
+    onTimeSelected: (String) -> Unit
+) {
+    val context = LocalContext.current
+    OutlinedTextField(
+        value = timeText,
+        onValueChange = {},
+        readOnly = true,
+        singleLine = true,
+        label = { Text(label) },
+        placeholder = { Text("hh:mm AM/PM") },
+        trailingIcon = {
+            TextButton(
+                onClick = {
+                    val now = Calendar.getInstance()
+                    TimePickerDialog(
+                        context,
+                        { _, hour, minute ->
+                            onTimeSelected(formatTimeAmPm(hour, minute))
+                        },
+                        now.get(Calendar.HOUR_OF_DAY),
+                        now.get(Calendar.MINUTE),
+                        false
+                    ).show()
+                }
+            ) {
+                Text("Pick")
+            }
+        },
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
+@Composable
+private fun DatePickerField(
+    label: String,
+    dateText: String,
+    onDateSelected: (String) -> Unit
+) {
+    val context = LocalContext.current
+    OutlinedTextField(
+        value = dateText,
+        onValueChange = {},
+        readOnly = true,
+        singleLine = true,
+        label = { Text(label) },
+        placeholder = { Text("dd/MM/yyyy") },
+        trailingIcon = {
+            TextButton(
+                onClick = {
+                    val now = Calendar.getInstance()
+                    DatePickerDialog(
+                        context,
+                        { _, year, month, dayOfMonth ->
+                            onDateSelected(
+                                String.format(
+                                    Locale.getDefault(),
+                                    "%02d/%02d/%04d",
+                                    dayOfMonth,
+                                    month + 1,
+                                    year
+                                )
+                            )
+                        },
+                        now.get(Calendar.YEAR),
+                        now.get(Calendar.MONTH),
+                        now.get(Calendar.DAY_OF_MONTH)
+                    ).show()
+                }
+            ) {
+                Text("Pick")
+            }
+        },
+        modifier = Modifier.fillMaxWidth()
     )
 }
 
@@ -876,10 +1094,10 @@ private fun GlassPanel(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
-            .background(Color(0x33FFFFFF))
+            .background(Color(0xCCFFF6EA))
             .border(
                 width = 1.dp,
-                color = Color(0x52FFFFFF),
+                color = Color(0x33A86A45),
                 shape = RoundedCornerShape(20.dp)
             )
             .padding(16.dp),
@@ -893,13 +1111,13 @@ private fun MetricPill(label: String, value: String) {
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(100.dp))
-            .background(Color(0x30FFFFFF))
+            .background(Color(0xFFEBCFB0))
             .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = label, color = Color(0xFFD2E5FF), style = MaterialTheme.typography.labelMedium)
+        Text(text = label, color = Color(0xFF6A4B36), style = MaterialTheme.typography.labelMedium)
         Spacer(modifier = Modifier.width(8.dp))
-        Text(text = value, color = Color.White, fontWeight = FontWeight.Bold)
+        Text(text = value, color = Color(0xFF3F2A19), fontWeight = FontWeight.Bold)
     }
 }
 
@@ -907,7 +1125,7 @@ private fun MetricPill(label: String, value: String) {
 private fun SectionTitle(title: String) {
     Text(
         text = title,
-        color = Color(0xFFEAF4FF),
+        color = Color(0xFF4C3321),
         style = MaterialTheme.typography.titleSmall,
         fontWeight = FontWeight.SemiBold
     )
@@ -941,6 +1159,7 @@ private fun buildTaskFromInputs(
     listType: TaskListType,
     title: String,
     description: String,
+    priority: TaskPriority,
     dailyTime: String,
     dailyReminderTime: String,
     weeklyDay: String,
@@ -964,6 +1183,7 @@ private fun buildTaskFromInputs(
                 title = title.trim(),
                 description = description.trim(),
                 listType = listType,
+                priority = priority,
                 scheduleText = "Today at ${dailyTime.trim()}",
                 reminderText = "Today at ${dailyReminderTime.trim()}",
                 reminderAtMillis = reminderMillis,
@@ -982,6 +1202,7 @@ private fun buildTaskFromInputs(
                 title = title.trim(),
                 description = description.trim(),
                 listType = listType,
+                priority = priority,
                 scheduleText = "${weeklyDay.trim()} ${weeklyTime.trim()}",
                 reminderText = "${weeklyReminderDay.trim()} ${weeklyReminderTime.trim()}",
                 reminderAtMillis = reminderMillis,
@@ -1000,6 +1221,7 @@ private fun buildTaskFromInputs(
                 title = title.trim(),
                 description = description.trim(),
                 listType = listType,
+                priority = priority,
                 scheduleText = "${monthlyDate.trim()} ${monthlyTime.trim()}",
                 reminderText = "${monthlyReminderDate.trim()} ${monthlyReminderTime.trim()}",
                 reminderAtMillis = reminderMillis,
@@ -1011,14 +1233,13 @@ private fun buildTaskFromInputs(
 }
 
 private fun parseTodayTime(timeText: String): Long? {
-    val parser = SimpleDateFormat("HH:mm", Locale.getDefault())
-    val timeDate = parser.parse(timeText.trim()) ?: return null
-    val now = Calendar.getInstance()
-    val parsed = Calendar.getInstance().apply { time = timeDate }
+    val (hour, minute) = parseHourMinute(timeText) ?: return null
+    val zone = TimeZone.getDefault()
+    val now = Calendar.getInstance(zone)
 
-    val scheduled = Calendar.getInstance().apply {
-        set(Calendar.HOUR_OF_DAY, parsed.get(Calendar.HOUR_OF_DAY))
-        set(Calendar.MINUTE, parsed.get(Calendar.MINUTE))
+    val scheduled = Calendar.getInstance(zone).apply {
+        set(Calendar.HOUR_OF_DAY, hour)
+        set(Calendar.MINUTE, minute)
         set(Calendar.SECOND, 0)
         set(Calendar.MILLISECOND, 0)
     }
@@ -1031,27 +1252,82 @@ private fun parseTodayTime(timeText: String): Long? {
 
 private fun parseWeeklyReminder(dayText: String, timeText: String): Long? {
     val targetDay = mapWeekDay(dayText) ?: return null
-    val parsedTime = SimpleDateFormat("HH:mm", Locale.getDefault()).parse(timeText.trim()) ?: return null
-    val parsedCal = Calendar.getInstance().apply { time = parsedTime }
+    val (hour, minute) = parseHourMinute(timeText) ?: return null
+    val zone = TimeZone.getDefault()
 
-    val scheduled = Calendar.getInstance().apply {
+    val scheduled = Calendar.getInstance(zone).apply {
         set(Calendar.DAY_OF_WEEK, targetDay)
-        set(Calendar.HOUR_OF_DAY, parsedCal.get(Calendar.HOUR_OF_DAY))
-        set(Calendar.MINUTE, parsedCal.get(Calendar.MINUTE))
+        set(Calendar.HOUR_OF_DAY, hour)
+        set(Calendar.MINUTE, minute)
         set(Calendar.SECOND, 0)
         set(Calendar.MILLISECOND, 0)
     }
 
-    if (scheduled.before(Calendar.getInstance())) {
+    if (scheduled.before(Calendar.getInstance(zone))) {
         scheduled.add(Calendar.WEEK_OF_YEAR, 1)
     }
     return scheduled.timeInMillis
 }
 
 private fun parseDateTime(dateText: String, timeText: String): Long? {
-    val parser = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
-    val date = parser.parse("${dateText.trim()} ${timeText.trim()}") ?: return null
-    return date.time
+    val patterns = listOf("dd/MM/yyyy hh:mm a", "dd/MM/yyyy HH:mm")
+    patterns.forEach { pattern ->
+        val parser = SimpleDateFormat(pattern, Locale.getDefault()).apply {
+            isLenient = false
+            timeZone = TimeZone.getDefault()
+        }
+        val parsed = runCatching { parser.parse("${dateText.trim()} ${timeText.trim()}") }.getOrNull()
+        if (parsed != null) return parsed.time
+    }
+    return null
+}
+
+private fun parseHourMinute(timeText: String): Pair<Int, Int>? {
+    val clean = timeText.trim()
+    val ampmParser = SimpleDateFormat("hh:mm a", Locale.getDefault()).apply {
+        isLenient = false
+        timeZone = TimeZone.getDefault()
+    }
+    val ampmParsed = runCatching { ampmParser.parse(clean.uppercase(Locale.getDefault())) }.getOrNull()
+    if (ampmParsed != null) {
+        val cal = Calendar.getInstance(TimeZone.getDefault()).apply { time = ampmParsed }
+        return cal.get(Calendar.HOUR_OF_DAY) to cal.get(Calendar.MINUTE)
+    }
+
+    val match = Regex("^([01]\\d|2[0-3]):([0-5]\\d)$").matchEntire(clean) ?: return null
+    val hour = match.groupValues[1].toIntOrNull() ?: return null
+    val minute = match.groupValues[2].toIntOrNull() ?: return null
+    return hour to minute
+}
+
+private fun formatTimeAmPm(hour: Int, minute: Int): String {
+    val calendar = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, hour)
+        set(Calendar.MINUTE, minute)
+    }
+    return SimpleDateFormat("hh:mm a", Locale.getDefault()).format(calendar.time)
+}
+
+@Composable
+private fun PriorityChip(priority: TaskPriority) {
+    val (bg, text) = when (priority) {
+        TaskPriority.LOW -> Color(0xFFCCEFD8) to Color(0xFF195B30)
+        TaskPriority.MEDIUM -> Color(0xFFF9E3B3) to Color(0xFF7B4D00)
+        TaskPriority.HIGH -> Color(0xFFF8C7C7) to Color(0xFF8A1F1F)
+    }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(100.dp))
+            .background(bg)
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = "${priority.name.lowercase().replaceFirstChar { it.uppercase() }} Priority",
+            color = text,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
 }
 
 private fun mapWeekDay(dayText: String): Int? {
@@ -1068,9 +1344,19 @@ private fun mapWeekDay(dayText: String): Int? {
 }
 
 private fun formatDateKey(timeMillis: Long): String {
-    return SimpleDateFormat("EEEE, dd MMM yyyy", Locale.getDefault()).format(Date(timeMillis))
+    return SimpleDateFormat("EEEE, dd MMM yyyy", Locale.getDefault()).apply {
+        timeZone = TimeZone.getDefault()
+    }.format(Date(timeMillis))
 }
 
 private fun formatHumanDate(timeMillis: Long): String {
-    return SimpleDateFormat("EEEE, dd MMM yyyy", Locale.getDefault()).format(Date(timeMillis))
+    return SimpleDateFormat("EEEE, dd MMM yyyy", Locale.getDefault()).apply {
+        timeZone = TimeZone.getDefault()
+    }.format(Date(timeMillis))
+}
+
+private fun formatLocalClock(timeMillis: Long): String {
+    return SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss", Locale.getDefault()).apply {
+        timeZone = TimeZone.getDefault()
+    }.format(Date(timeMillis))
 }
