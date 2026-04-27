@@ -47,17 +47,20 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -83,9 +86,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            ToDoAppTheme {
-                ToDoAppRoot()
-            }
+            ToDoAppRoot()
         }
     }
 }
@@ -99,6 +100,12 @@ fun ToDoAppRoot() {
     val history = remember { mutableStateListOf<HistoryItem>() }
     var currentScreen by remember { mutableStateOf<AppScreen>(AppScreen.Home) }
     var currentTimeMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    var use24HourFormat by remember { mutableStateOf(storage.loadUse24HourFormat()) }
+    var reminderVibrationEnabled by remember { mutableStateOf(storage.loadReminderVibrationEnabled()) }
+    var defaultPriority by remember { mutableStateOf(storage.loadDefaultPriority()) }
+    var darkThemeEnabled by remember { mutableStateOf(storage.loadDarkThemeEnabled()) }
+    var uiStylePreset by remember { mutableStateOf(parseUiStylePreset(storage.loadUiStylePresetName())) }
+    var activeDayKey by remember { mutableStateOf(formatDateKey(System.currentTimeMillis())) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -113,106 +120,96 @@ fun ToDoAppRoot() {
         allTasks.clear()
         allTasks.addAll(storage.loadTasks())
         history.clear()
-        history.addAll(storage.loadHistory())
-
-        val todayKey = formatDateKey(System.currentTimeMillis())
-        val oldDailyTasks = allTasks.filter {
-            it.listType == TaskListType.DAILY && it.createdDateKey != todayKey
-        }
-        if (oldDailyTasks.isNotEmpty()) {
-            val updatedHistory = history.toMutableList()
-            oldDailyTasks.forEach { task ->
-                updatedHistory.add(
-                    HistoryItem(
-                        id = UUID.randomUUID().toString(),
-                        taskTitle = task.title,
-                        listType = TaskListType.DAILY,
-                        actionText = if (task.isDone) "Completed" else "Not completed",
-                        dayDateLabel = task.createdDateKey,
-                        timestampMillis = System.currentTimeMillis()
-                    )
-                )
-            }
-
-            val remaining = allTasks.filterNot { it in oldDailyTasks }
-            allTasks.clear()
-            allTasks.addAll(remaining)
-
-            history.clear()
-            history.addAll(updatedHistory)
-
-            storage.saveTasks(allTasks)
-            storage.saveHistory(history)
-        }
+        history.addAll(storage.loadHistory().filter { it.actionText == "Done" || it.actionText == "Not done" })
+        archivePreviousDayDailyTasks(allTasks, history, storage)
+        activeDayKey = formatDateKey(System.currentTimeMillis())
     }
 
     LaunchedEffect(Unit) {
         while (true) {
             currentTimeMillis = System.currentTimeMillis()
+
+            val latestDay = formatDateKey(currentTimeMillis)
+            if (latestDay != activeDayKey) {
+                archivePreviousDayDailyTasks(allTasks, history, storage)
+                activeDayKey = latestDay
+            }
+
             delay(1_000)
         }
     }
 
-    GradientBackdrop {
-        when (val screen = currentScreen) {
-            AppScreen.Home -> HomeScreen(
-                onOpenList = { currentScreen = AppScreen.List(it) },
-                allTasksCount = allTasks.size,
-                completedCount = allTasks.count { it.isDone },
-                localTimeLabel = formatLocalClock(currentTimeMillis),
-                timeZoneLabel = TimeZone.getDefault().id
-            )
-
-            is AppScreen.List -> TaskListScreen(
-                listType = screen.listType,
-                tasks = allTasks.filter { it.listType == screen.listType },
-                history = history.filter { it.listType == screen.listType }
-                    .sortedByDescending { it.timestampMillis },
-                onBack = { currentScreen = AppScreen.Home },
-                onAddTask = { newTask ->
-                    allTasks.add(newTask)
-                    storage.saveTasks(allTasks)
-                    ReminderScheduler.scheduleReminder(context, newTask)
-                },
-                onUpdateTaskStatus = { taskId, done ->
-                    val updated = allTasks.map { task ->
-                        if (task.id == taskId) task.copy(isDone = done) else task
-                    }
-                    allTasks.clear()
-                    allTasks.addAll(updated)
-                    storage.saveTasks(allTasks)
-
-                    val changedTask = updated.firstOrNull { it.id == taskId } ?: return@TaskListScreen
-                    val entry = HistoryItem(
-                        id = UUID.randomUUID().toString(),
-                        taskTitle = changedTask.title,
-                        listType = changedTask.listType,
-                        actionText = if (done) "Marked done" else "Marked not done",
-                        dayDateLabel = formatHumanDate(System.currentTimeMillis()),
-                        timestampMillis = System.currentTimeMillis()
+    ToDoAppTheme(darkTheme = darkThemeEnabled) {
+        CompositionLocalProvider(LocalUiStylePreset provides uiStylePreset) {
+            GradientBackdrop {
+                when (val screen = currentScreen) {
+                    AppScreen.Home -> HomeScreen(
+                        onOpenList = { currentScreen = AppScreen.List(it) },
+                        onOpenSettings = { currentScreen = AppScreen.Settings },
+                        allTasksCount = allTasks.size,
+                        completedCount = allTasks.count { it.isDone },
+                        localTimeLabel = formatLocalClock(currentTimeMillis),
+                        timeZoneLabel = TimeZone.getDefault().id
                     )
-                    history.add(entry)
-                    storage.saveHistory(history)
-                },
-                onDeleteTask = { taskId ->
-                    val target = allTasks.firstOrNull { it.id == taskId } ?: return@TaskListScreen
-                    allTasks.removeAll { it.id == taskId }
-                    storage.saveTasks(allTasks)
-                    ReminderScheduler.cancelReminder(context, taskId)
 
-                    history.add(
-                        HistoryItem(
-                            id = UUID.randomUUID().toString(),
-                            taskTitle = target.title,
-                            listType = target.listType,
-                            actionText = "Deleted task",
-                            dayDateLabel = formatHumanDate(System.currentTimeMillis()),
-                            timestampMillis = System.currentTimeMillis()
-                        )
+                    is AppScreen.List -> TaskListScreen(
+                        listType = screen.listType,
+                        tasks = allTasks.filter { it.listType == screen.listType },
+                        history = history.filter { it.listType == screen.listType }
+                            .sortedByDescending { it.timestampMillis },
+                        use24HourFormat = use24HourFormat,
+                        defaultPriority = defaultPriority,
+                        onBack = { currentScreen = AppScreen.Home },
+                        onAddTask = { newTask ->
+                            allTasks.add(newTask)
+                            storage.saveTasks(allTasks)
+                            ReminderScheduler.scheduleReminder(context, newTask)
+                        },
+                        onUpdateTaskStatus = { taskId, done ->
+                            val updated = allTasks.map { task ->
+                                if (task.id == taskId) task.copy(isDone = done) else task
+                            }
+                            allTasks.clear()
+                            allTasks.addAll(updated)
+                            storage.saveTasks(allTasks)
+                        },
+                        onDeleteTask = { taskId ->
+                            allTasks.removeAll { it.id == taskId }
+                            storage.saveTasks(allTasks)
+                            ReminderScheduler.cancelReminder(context, taskId)
+                        }
                     )
-                    storage.saveHistory(history)
+
+                    AppScreen.Settings -> SettingsScreen(
+                        darkThemeEnabled = darkThemeEnabled,
+                        uiStylePreset = uiStylePreset,
+                        use24HourFormat = use24HourFormat,
+                        reminderVibrationEnabled = reminderVibrationEnabled,
+                        defaultPriority = defaultPriority,
+                        onBack = { currentScreen = AppScreen.Home },
+                        onDarkThemeChanged = {
+                            darkThemeEnabled = it
+                            storage.saveDarkThemeEnabled(it)
+                        },
+                        onUiStylePresetChanged = {
+                            uiStylePreset = it
+                            storage.saveUiStylePresetName(it.name)
+                        },
+                        onUse24HourFormatChanged = {
+                            use24HourFormat = it
+                            storage.saveUse24HourFormat(it)
+                        },
+                        onReminderVibrationChanged = {
+                            reminderVibrationEnabled = it
+                            storage.saveReminderVibrationEnabled(it)
+                        },
+                        onDefaultPriorityChanged = {
+                            defaultPriority = it
+                            storage.saveDefaultPriority(it)
+                        }
+                    )
                 }
-            )
+            }
         }
     }
 }
@@ -224,6 +221,7 @@ fun GreetingPreview() {
         GradientBackdrop {
             HomeScreen(
                 onOpenList = {},
+                onOpenSettings = {},
                 allTasksCount = 12,
                 completedCount = 7,
                 localTimeLabel = "Fri, 25 Apr 2026 09:30:00",
@@ -236,6 +234,7 @@ fun GreetingPreview() {
 private sealed class AppScreen {
     data object Home : AppScreen()
     data class List(val listType: TaskListType) : AppScreen()
+    data object Settings : AppScreen()
 }
 
 private enum class ListSection {
@@ -243,18 +242,38 @@ private enum class ListSection {
     HISTORY
 }
 
+private enum class UiStylePreset {
+    MINIMAL,
+    BOLD
+}
+
+private val LocalUiStylePreset = staticCompositionLocalOf { UiStylePreset.MINIMAL }
+
 @Composable
 private fun GradientBackdrop(content: @Composable () -> Unit) {
+    val colorScheme = MaterialTheme.colorScheme
+    val darkMode = colorScheme.background.luminance() < 0.5f
+    val stylePreset = LocalUiStylePreset.current
+    val gradientStops = if (stylePreset == UiStylePreset.BOLD) {
+        if (darkMode) {
+            listOf(Color(0xFF111129), Color(0xFF2A1841), Color(0xFF39214D))
+        } else {
+            listOf(Color(0xFFFFF2D8), Color(0xFFFFDFC7), Color(0xFFFFD0C4))
+        }
+    } else {
+        if (darkMode) {
+            listOf(Color(0xFF111A24), Color(0xFF182739), Color(0xFF1F3347))
+        } else {
+            listOf(Color(0xFFF7F0E8), Color(0xFFF0E2D2), Color(0xFFEADCCB))
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFFFBF3E8),
-                        Color(0xFFF4E2CE),
-                        Color(0xFFEAD8C4)
-                    )
+                    colors = gradientStops
                 )
             )
     ) {
@@ -264,7 +283,11 @@ private fun GradientBackdrop(content: @Composable () -> Unit) {
                 .background(
                     Brush.radialGradient(
                         colors = listOf(
-                            Color(0x66FFFFFF),
+                            if (stylePreset == UiStylePreset.BOLD) {
+                                if (darkMode) Color(0x33FFFFFF) else Color(0x7AFFFFFF)
+                            } else {
+                                if (darkMode) Color(0x22FFFFFF) else Color(0x66FFFFFF)
+                            },
                             Color.Transparent
                         ),
                         radius = 900f
@@ -279,6 +302,7 @@ private fun GradientBackdrop(content: @Composable () -> Unit) {
 @Composable
 private fun HomeScreen(
     onOpenList: (TaskListType) -> Unit,
+    onOpenSettings: () -> Unit,
     allTasksCount: Int,
     completedCount: Int,
     localTimeLabel: String,
@@ -304,22 +328,22 @@ private fun HomeScreen(
                         text = "ToDo Hub",
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF3F2A19)
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Warm planner for daily wins, weekly rhythm, and monthly goals.",
-                        color = Color(0xFF6A4A34)
+                        text = "Momentum dashboard: plan, focus, complete.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Local time: $localTimeLabel",
-                        color = Color(0xFF6E4D35),
+                        color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.labelLarge
                     )
                     Text(
                         text = "Time zone: $timeZoneLabel",
-                        color = Color(0xFF8C6345),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.labelSmall
                     )
                     Spacer(modifier = Modifier.height(12.dp))
@@ -369,7 +393,7 @@ private fun HomeScreen(
                     Text(
                         text = "Jump to a section with dropdown",
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF4D321E)
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     ExposedDropdownMenuBox(
@@ -409,13 +433,22 @@ private fun HomeScreen(
                         onClick = { onOpenList(quickTarget) },
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFC46F3C),
-                            contentColor = Color.White
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
                         )
                     ) {
                         Text("Open ${taskListTitle(quickTarget)}")
                     }
                 }
+            }
+
+            item {
+                HomeOptionCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = "Settings",
+                    subtitle = "Time format, vibration, default priority",
+                    onClick = onOpenSettings
+                )
             }
         }
     }
@@ -428,24 +461,36 @@ private fun HomeOptionCard(
     subtitle: String,
     onClick: () -> Unit
 ) {
+    val stylePreset = LocalUiStylePreset.current
+    val shape = if (stylePreset == UiStylePreset.BOLD) RoundedCornerShape(14.dp) else RoundedCornerShape(22.dp)
+    val container = if (stylePreset == UiStylePreset.BOLD) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
+
     Card(
         modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
+            .clip(shape)
             .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFEED8C2)),
-        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = container),
+        shape = shape,
         border = CardDefaults.outlinedCardBorder().copy(brush = Brush.verticalGradient(
-            colors = listOf(Color(0x99FFFFFF), Color(0x33FFFFFF))
+            colors = if (stylePreset == UiStylePreset.BOLD) {
+                listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.7f), MaterialTheme.colorScheme.secondary.copy(alpha = 0.35f))
+            } else {
+                listOf(Color(0x88FFFFFF), Color(0x22FFFFFF))
+            }
         ))
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text(text = title, style = MaterialTheme.typography.titleLarge, color = Color(0xFF412A19))
-            Text(text = subtitle, style = MaterialTheme.typography.bodyMedium, color = Color(0xFF6D4A33))
+            Text(text = title, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
+            Text(text = subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(modifier = Modifier.height(4.dp))
-            Text(text = "Tap to open", style = MaterialTheme.typography.labelMedium, color = Color(0xFFA04F22))
+            Text(text = "Tap to open", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -456,6 +501,8 @@ private fun TaskListScreen(
     listType: TaskListType,
     tasks: List<TaskItem>,
     history: List<HistoryItem>,
+    use24HourFormat: Boolean,
+    defaultPriority: TaskPriority,
     onBack: () -> Unit,
     onAddTask: (TaskItem) -> Unit,
     onUpdateTaskStatus: (String, Boolean) -> Unit,
@@ -470,11 +517,11 @@ private fun TaskListScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text(taskListTitle(listType), color = Color.White)
+                        Text(taskListTitle(listType), color = MaterialTheme.colorScheme.onSurface)
                         Text(
                             text = taskListSubtitle(listType),
                             style = MaterialTheme.typography.labelMedium,
-                            color = Color(0xFF5F422F)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 },
@@ -489,8 +536,8 @@ private fun TaskListScreen(
             if (selectedSection == ListSection.TASKS) {
                 FloatingActionButton(
                     onClick = { showAddDialog = true },
-                    containerColor = Color(0xFFC46F3C),
-                    contentColor = Color.White
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 ) {
                     Text("+")
                 }
@@ -510,11 +557,11 @@ private fun TaskListScreen(
                     Text(
                         text = "${tasks.count { it.isDone }}/${tasks.size} completed",
                         style = MaterialTheme.typography.titleMedium,
-                        color = Color(0xFF412A19),
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.SemiBold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(taskListDescription(listType), color = Color(0xFF6B4932))
+                    Text(taskListDescription(listType), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -552,6 +599,8 @@ private fun TaskListScreen(
     if (showAddDialog) {
         AddTaskDialog(
             listType = listType,
+            use24HourFormat = use24HourFormat,
+            defaultPriority = defaultPriority,
             onDismiss = { showAddDialog = false },
             onConfirm = { task ->
                 onAddTask(task)
@@ -568,8 +617,8 @@ private fun SectionToggleButton(
     text: String,
     onClick: () -> Unit
 ) {
-    val bg = if (selected) Color(0xFFC46F3C) else Color(0x55FFFFFF)
-    val fg = if (selected) Color.White else Color(0xFF5C3F2D)
+    val bg = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    val fg = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
     Button(
         onClick = onClick,
         modifier = modifier,
@@ -594,8 +643,8 @@ private fun TaskContent(
             Button(
                 onClick = { filter = item },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (selected) Color(0xFFA55B2F) else Color(0x66FFFFFF),
-                    contentColor = if (selected) Color.White else Color(0xFF5C3F2D)
+                    containerColor = if (selected) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = if (selected) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onSurfaceVariant
                 ),
                 shape = RoundedCornerShape(12.dp)
             ) {
@@ -615,7 +664,7 @@ private fun TaskContent(
         GlassPanel {
             Text(
                 text = if (tasks.isEmpty()) "No tasks yet. Tap + to add your first task." else "No tasks in this filter.",
-                color = Color(0xFF5E412F),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -628,7 +677,7 @@ private fun TaskContent(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFF2DFC9)),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = CardDefaults.outlinedCardBorder().copy(
                     brush = Brush.verticalGradient(listOf(Color(0xAAFFFFFF), Color(0x44FFFFFF)))
                 )
@@ -638,17 +687,17 @@ private fun TaskContent(
                         task.title,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF412A19)
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     PriorityChip(task.priority)
                     if (task.description.isNotBlank()) {
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(task.description, style = MaterialTheme.typography.bodyMedium, color = Color(0xFF644633))
+                        Text(task.description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Schedule: ${task.scheduleText}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF8A6144))
-                    Text("Reminder: ${task.reminderText}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF8A6144))
+                    Text("Schedule: ${task.scheduleText}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Reminder: ${task.reminderText}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -663,7 +712,7 @@ private fun TaskContent(
                                 checked = task.isDone,
                                 onCheckedChange = { checked -> onUpdateTaskStatus(task.id, checked) }
                             )
-                            Text(if (task.isDone) "Done" else "In progress", color = Color(0xFF4E3424))
+                            Text(if (task.isDone) "Done" else "In progress", color = MaterialTheme.colorScheme.onSurface)
                         }
                         Spacer(modifier = Modifier.weight(1f))
                         TextButton(onClick = { onDeleteTask(task.id) }) {
@@ -678,11 +727,14 @@ private fun TaskContent(
 
 @Composable
 private fun HistoryContent(history: List<HistoryItem>) {
-    if (history.isEmpty()) {
+    val doneHistory = history.filter { it.actionText == "Done" }
+    val notDoneHistory = history.filter { it.actionText == "Not done" }
+
+    if (doneHistory.isEmpty() && notDoneHistory.isEmpty()) {
         GlassPanel {
             Text(
                 text = "No history found yet.",
-                color = Color(0xFFE9F3FF),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -691,11 +743,14 @@ private fun HistoryContent(history: List<HistoryItem>) {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        history.forEach { entry ->
+        if (doneHistory.isNotEmpty()) {
+            SectionTitle("Done (${doneHistory.size})")
+        }
+        doneHistory.forEach { entry ->
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFF2DFC9)),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.20f)),
                 border = CardDefaults.outlinedCardBorder().copy(
                     brush = Brush.verticalGradient(listOf(Color(0xAAFFFFFF), Color(0x44FFFFFF)))
                 )
@@ -705,11 +760,35 @@ private fun HistoryContent(history: List<HistoryItem>) {
                         entry.taskTitle,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF412A19)
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(entry.actionText, style = MaterialTheme.typography.bodyMedium, color = Color(0xFF664733))
-                    Text(entry.dayDateLabel, style = MaterialTheme.typography.bodySmall, color = Color(0xFF8A6144))
+                    Text(entry.dayDateLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+
+        if (notDoneHistory.isNotEmpty()) {
+            SectionTitle("Not Done (${notDoneHistory.size})")
+        }
+        notDoneHistory.forEach { entry ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.16f)),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = Brush.verticalGradient(listOf(Color(0xAAFFFFFF), Color(0x44FFFFFF)))
+                )
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        entry.taskTitle,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(entry.dayDateLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -720,12 +799,14 @@ private fun HistoryContent(history: List<HistoryItem>) {
 @Composable
 private fun AddTaskDialog(
     listType: TaskListType,
+    use24HourFormat: Boolean,
+    defaultPriority: TaskPriority,
     onDismiss: () -> Unit,
     onConfirm: (TaskItem) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
-    var priority by remember { mutableStateOf(TaskPriority.MEDIUM) }
+    var priority by remember(defaultPriority) { mutableStateOf(defaultPriority) }
 
     var dailyTime by remember { mutableStateOf("") }
     var dailyReminderTime by remember { mutableStateOf("") }
@@ -744,9 +825,9 @@ private fun AddTaskDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFFF5E7D7),
+        containerColor = MaterialTheme.colorScheme.surface,
         tonalElevation = 6.dp,
-        title = { Text("Add Task", color = Color(0xFF412A19)) },
+        title = { Text("Add Task", color = MaterialTheme.colorScheme.onSurface) },
         text = {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 item {
@@ -775,14 +856,16 @@ private fun AddTaskDialog(
                             TimePickerField(
                                 label = "Task time",
                                 timeText = dailyTime,
-                                onTimeSelected = { dailyTime = it }
+                                onTimeSelected = { dailyTime = it },
+                                use24HourFormat = use24HourFormat
                             )
                         }
                         item {
                             TimePickerField(
                                 label = "Reminder time",
                                 timeText = dailyReminderTime,
-                                onTimeSelected = { dailyReminderTime = it }
+                                onTimeSelected = { dailyReminderTime = it },
+                                use24HourFormat = use24HourFormat
                             )
                         }
                     }
@@ -800,7 +883,8 @@ private fun AddTaskDialog(
                             TimePickerField(
                                 label = "Task time",
                                 timeText = weeklyTime,
-                                onTimeSelected = { weeklyTime = it }
+                                onTimeSelected = { weeklyTime = it },
+                                use24HourFormat = use24HourFormat
                             )
                         }
                         item { SectionTitle("Reminder") }
@@ -815,7 +899,8 @@ private fun AddTaskDialog(
                             TimePickerField(
                                 label = "Reminder time",
                                 timeText = weeklyReminderTime,
-                                onTimeSelected = { weeklyReminderTime = it }
+                                onTimeSelected = { weeklyReminderTime = it },
+                                use24HourFormat = use24HourFormat
                             )
                         }
                     }
@@ -833,7 +918,8 @@ private fun AddTaskDialog(
                             TimePickerField(
                                 label = "Task time",
                                 timeText = monthlyTime,
-                                onTimeSelected = { monthlyTime = it }
+                                onTimeSelected = { monthlyTime = it },
+                                use24HourFormat = use24HourFormat
                             )
                         }
                         item { SectionTitle("Reminder") }
@@ -848,7 +934,8 @@ private fun AddTaskDialog(
                             TimePickerField(
                                 label = "Reminder time",
                                 timeText = monthlyReminderTime,
-                                onTimeSelected = { monthlyReminderTime = it }
+                                onTimeSelected = { monthlyReminderTime = it },
+                                use24HourFormat = use24HourFormat
                             )
                         }
                     }
@@ -856,8 +943,8 @@ private fun AddTaskDialog(
 
                 item {
                     Text(
-                        text = "All reminders use your current local timezone (${TimeZone.getDefault().id}).",
-                        color = Color(0xFF7D573D),
+                        text = "All reminders use your current local timezone (${TimeZone.getDefault().id}) and ${if (use24HourFormat) "24h" else "12h AM/PM"} format.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.labelSmall
                     )
                 }
@@ -904,8 +991,8 @@ private fun AddTaskDialog(
                     }
                 },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFC46F3C),
-                    contentColor = Color.White
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 )
             ) {
                 Text("Add")
@@ -913,7 +1000,7 @@ private fun AddTaskDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color(0xFF6D4B34))
+                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     )
@@ -965,7 +1052,8 @@ private fun PriorityDropdownField(
 private fun TimePickerField(
     label: String,
     timeText: String,
-    onTimeSelected: (String) -> Unit
+    onTimeSelected: (String) -> Unit,
+    use24HourFormat: Boolean
 ) {
     val context = LocalContext.current
     OutlinedTextField(
@@ -974,7 +1062,7 @@ private fun TimePickerField(
         readOnly = true,
         singleLine = true,
         label = { Text(label) },
-        placeholder = { Text("hh:mm AM/PM") },
+        placeholder = { Text(if (use24HourFormat) "HH:mm" else "hh:mm AM/PM") },
         trailingIcon = {
             TextButton(
                 onClick = {
@@ -982,11 +1070,16 @@ private fun TimePickerField(
                     TimePickerDialog(
                         context,
                         { _, hour, minute ->
-                            onTimeSelected(formatTimeAmPm(hour, minute))
+                            val output = if (use24HourFormat) {
+                                String.format(Locale.getDefault(), "%02d:%02d", hour, minute)
+                            } else {
+                                formatTimeAmPm(hour, minute)
+                            }
+                            onTimeSelected(output)
                         },
                         now.get(Calendar.HOUR_OF_DAY),
                         now.get(Calendar.MINUTE),
-                        false
+                        use24HourFormat
                     ).show()
                 }
             ) {
@@ -1085,22 +1178,215 @@ private fun DayDropdownField(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsScreen(
+    darkThemeEnabled: Boolean,
+    uiStylePreset: UiStylePreset,
+    use24HourFormat: Boolean,
+    reminderVibrationEnabled: Boolean,
+    defaultPriority: TaskPriority,
+    onBack: () -> Unit,
+    onDarkThemeChanged: (Boolean) -> Unit,
+    onUiStylePresetChanged: (UiStylePreset) -> Unit,
+    onUse24HourFormatChanged: (Boolean) -> Unit,
+    onReminderVibrationChanged: (Boolean) -> Unit,
+    onDefaultPriorityChanged: (TaskPriority) -> Unit
+) {
+    var priorityExpanded by remember { mutableStateOf(false) }
+
+    Scaffold(
+        containerColor = Color.Transparent,
+        topBar = {
+            TopAppBar(
+                title = { Text("Settings", color = MaterialTheme.colorScheme.onSurface) },
+                actions = {
+                    TextButton(onClick = onBack) {
+                        Text("Home")
+                    }
+                }
+            )
+        },
+        modifier = Modifier.fillMaxSize()
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                GlassPanel {
+                    SectionTitle("Appearance")
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            if (darkThemeEnabled) "Dark mode" else "Light mode",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        androidx.compose.material3.Switch(
+                            checked = darkThemeEnabled,
+                            onCheckedChange = onDarkThemeChanged
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Style Preset",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { onUiStylePresetChanged(UiStylePreset.MINIMAL) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (uiStylePreset == UiStylePreset.MINIMAL) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (uiStylePreset == UiStylePreset.MINIMAL) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Minimal")
+                        }
+                        Button(
+                            onClick = { onUiStylePresetChanged(UiStylePreset.BOLD) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (uiStylePreset == UiStylePreset.BOLD) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (uiStylePreset == UiStylePreset.BOLD) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Bold")
+                        }
+                    }
+                }
+            }
+
+            item {
+                GlassPanel {
+                    SectionTitle("Time Format")
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { onUse24HourFormatChanged(false) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (!use24HourFormat) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (!use24HourFormat) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("12h AM/PM")
+                        }
+                        Button(
+                            onClick = { onUse24HourFormatChanged(true) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (use24HourFormat) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (use24HourFormat) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("24h")
+                        }
+                    }
+                }
+            }
+
+            item {
+                GlassPanel {
+                    SectionTitle("Reminder Vibration")
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            if (reminderVibrationEnabled) "Enabled" else "Disabled",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        androidx.compose.material3.Switch(
+                            checked = reminderVibrationEnabled,
+                            onCheckedChange = onReminderVibrationChanged
+                        )
+                    }
+                }
+            }
+
+            item {
+                GlassPanel {
+                    SectionTitle("Default Priority")
+                    Spacer(modifier = Modifier.height(6.dp))
+                    ExposedDropdownMenuBox(
+                        expanded = priorityExpanded,
+                        onExpandedChange = { priorityExpanded = !priorityExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = defaultPriority.name.lowercase().replaceFirstChar { it.uppercase() },
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Priority") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = priorityExpanded) },
+                            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor()
+                        )
+                        DropdownMenu(
+                            expanded = priorityExpanded,
+                            onDismissRequest = { priorityExpanded = false }
+                        ) {
+                            TaskPriority.entries.forEach { priority ->
+                                DropdownMenuItem(
+                                    text = { Text(priority.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                                    onClick = {
+                                        onDefaultPriorityChanged(priority)
+                                        priorityExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun GlassPanel(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val stylePreset = LocalUiStylePreset.current
+    val cornerRadius = if (stylePreset == UiStylePreset.BOLD) 14.dp else 26.dp
+    val backgroundColor = if (stylePreset == UiStylePreset.BOLD) {
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.88f)
+    } else {
+        MaterialTheme.colorScheme.surface.copy(alpha = 0.90f)
+    }
+    val borderColor = if (stylePreset == UiStylePreset.BOLD) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+    } else {
+        MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xCCFFF6EA))
+            .clip(RoundedCornerShape(cornerRadius))
+            .background(backgroundColor)
             .border(
-                width = 1.dp,
-                color = Color(0x33A86A45),
-                shape = RoundedCornerShape(20.dp)
+                width = 1.2.dp,
+                color = borderColor,
+                shape = RoundedCornerShape(cornerRadius)
             )
-            .padding(16.dp),
+            .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
         content = content
     )
@@ -1111,13 +1397,13 @@ private fun MetricPill(label: String, value: String) {
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(100.dp))
-            .background(Color(0xFFEBCFB0))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = label, color = Color(0xFF6A4B36), style = MaterialTheme.typography.labelMedium)
+        Text(text = label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
         Spacer(modifier = Modifier.width(8.dp))
-        Text(text = value, color = Color(0xFF3F2A19), fontWeight = FontWeight.Bold)
+        Text(text = value, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -1125,7 +1411,7 @@ private fun MetricPill(label: String, value: String) {
 private fun SectionTitle(title: String) {
     Text(
         text = title,
-        color = Color(0xFF4C3321),
+        color = MaterialTheme.colorScheme.onSurface,
         style = MaterialTheme.typography.titleSmall,
         fontWeight = FontWeight.SemiBold
     )
@@ -1359,4 +1645,45 @@ private fun formatLocalClock(timeMillis: Long): String {
     return SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss", Locale.getDefault()).apply {
         timeZone = TimeZone.getDefault()
     }.format(Date(timeMillis))
+}
+
+private fun parseUiStylePreset(raw: String): UiStylePreset {
+    return UiStylePreset.entries.firstOrNull { it.name == raw } ?: UiStylePreset.MINIMAL
+}
+
+private fun archivePreviousDayDailyTasks(
+    allTasks: MutableList<TaskItem>,
+    history: MutableList<HistoryItem>,
+    storage: TaskStorage
+) {
+    val todayKey = formatDateKey(System.currentTimeMillis())
+    val oldDailyTasks = allTasks.filter {
+        it.listType == TaskListType.DAILY && it.createdDateKey != todayKey
+    }
+
+    if (oldDailyTasks.isEmpty()) return
+
+    val updatedHistory = history.toMutableList()
+    oldDailyTasks.forEach { task ->
+        updatedHistory.add(
+            HistoryItem(
+                id = UUID.randomUUID().toString(),
+                taskTitle = task.title,
+                listType = TaskListType.DAILY,
+                actionText = if (task.isDone) "Done" else "Not done",
+                dayDateLabel = task.createdDateKey,
+                timestampMillis = System.currentTimeMillis()
+            )
+        )
+    }
+
+    val remaining = allTasks.filterNot { it in oldDailyTasks }
+    allTasks.clear()
+    allTasks.addAll(remaining)
+
+    history.clear()
+    history.addAll(updatedHistory.filter { it.actionText == "Done" || it.actionText == "Not done" })
+
+    storage.saveTasks(allTasks)
+    storage.saveHistory(history)
 }

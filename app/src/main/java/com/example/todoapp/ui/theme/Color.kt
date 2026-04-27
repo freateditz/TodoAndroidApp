@@ -16,3 +16,14 @@ val GlassBorder = Color(0x33A86A45)
 
 val TextPrimary = Color(0xFF3F2A19)
 val TextSecondary = Color(0xFF705039)
+
+val NightPrimary = Color(0xFFFFB58A)
+val NightSecondary = Color(0xFFD2C2A8)
+val NightTertiary = Color(0xFF9FC8A5)
+
+val NightBackground = Color(0xFF1A1411)
+val NightSurface = Color(0xFF241C18)
+val NightSurfaceVariant = Color(0xFF302621)
+
+val NightTextPrimary = Color(0xFFF4DED1)
+val NightTextSecondary = Color(0xFFD3BCAF)

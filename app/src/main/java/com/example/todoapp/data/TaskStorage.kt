@@ -104,9 +104,55 @@ class TaskStorage(context: Context) {
         prefs.edit().putString(KEY_HISTORY, jsonArray.toString()).apply()
     }
 
+    fun loadUse24HourFormat(): Boolean {
+        return prefs.getBoolean(KEY_USE_24_HOUR, false)
+    }
+
+    fun saveUse24HourFormat(value: Boolean) {
+        prefs.edit().putBoolean(KEY_USE_24_HOUR, value).apply()
+    }
+
+    fun loadReminderVibrationEnabled(): Boolean {
+        return prefs.getBoolean(KEY_REMINDER_VIBRATION, true)
+    }
+
+    fun saveReminderVibrationEnabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_REMINDER_VIBRATION, value).apply()
+    }
+
+    fun loadDefaultPriority(): TaskPriority {
+        val raw = prefs.getString(KEY_DEFAULT_PRIORITY, TaskPriority.MEDIUM.name).orEmpty()
+        return TaskPriority.entries.firstOrNull { it.name == raw } ?: TaskPriority.MEDIUM
+    }
+
+    fun saveDefaultPriority(priority: TaskPriority) {
+        prefs.edit().putString(KEY_DEFAULT_PRIORITY, priority.name).apply()
+    }
+
+    fun loadDarkThemeEnabled(): Boolean {
+        return prefs.getBoolean(KEY_DARK_THEME, false)
+    }
+
+    fun saveDarkThemeEnabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_DARK_THEME, value).apply()
+    }
+
+    fun loadUiStylePresetName(): String {
+        return prefs.getString(KEY_UI_STYLE_PRESET, "MINIMAL").orEmpty()
+    }
+
+    fun saveUiStylePresetName(value: String) {
+        prefs.edit().putString(KEY_UI_STYLE_PRESET, value).apply()
+    }
+
     companion object {
         private const val PREF_NAME = "todo_local_store"
         private const val KEY_TASKS = "tasks"
         private const val KEY_HISTORY = "history"
+        private const val KEY_USE_24_HOUR = "use_24_hour"
+        private const val KEY_REMINDER_VIBRATION = "reminder_vibration"
+        private const val KEY_DEFAULT_PRIORITY = "default_priority"
+        private const val KEY_DARK_THEME = "dark_theme"
+        private const val KEY_UI_STYLE_PRESET = "ui_style_preset"
     }
 }

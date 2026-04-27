@@ -12,11 +12,13 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.example.todoapp.R
+import com.example.todoapp.data.TaskStorage
 
 class ReminderReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        createChannelIfNeeded(context)
+        val vibrationEnabled = TaskStorage(context).loadReminderVibrationEnabled()
+        createChannelIfNeeded(context, vibrationEnabled)
 
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -34,14 +36,14 @@ class ReminderReceiver : BroadcastReceiver() {
             .setContentTitle("Task Reminder")
             .setContentText("$taskTitle ($scheduleText)")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setVibrate(VIBRATION_PATTERN)
+            .setVibrate(if (vibrationEnabled) VIBRATION_PATTERN else longArrayOf(0L))
             .setAutoCancel(true)
             .build()
 
         NotificationManagerCompat.from(context).notify(taskId.hashCode(), notification)
     }
 
-    private fun createChannelIfNeeded(context: Context) {
+    private fun createChannelIfNeeded(context: Context, vibrationEnabled: Boolean) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channel = NotificationChannel(
@@ -49,8 +51,8 @@ class ReminderReceiver : BroadcastReceiver() {
             CHANNEL_NAME,
             NotificationManager.IMPORTANCE_HIGH
         )
-        channel.enableVibration(true)
-        channel.vibrationPattern = VIBRATION_PATTERN
+        channel.enableVibration(vibrationEnabled)
+        channel.vibrationPattern = if (vibrationEnabled) VIBRATION_PATTERN else longArrayOf(0L)
         notificationManager.createNotificationChannel(channel)
     }
 
